@@ -1,0 +1,8 @@
+{
+  "name": "rsi-alarm-backend",
+  "version": "1.0.0",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "firebase-admin": "^12.0.0"
+  }
+}
