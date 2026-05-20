@@ -2,7 +2,7 @@ name: RSI Alarm Check
 
 on:
   schedule:
-    - cron: '*/15 8-22 * * 1-5'
+    - cron: '*/10 8-22 * * 1-5'
   workflow_dispatch:
 
 jobs:
