@@ -40,6 +40,13 @@ async function checkAlarms() {
       }
     }
   }
+
+  // Timestamp in Firestore schreiben nach jedem Lauf
+  await db.collection("status").doc("scheduler").set({
+    lastRun: admin.firestore.FieldValue.serverTimestamp(),
+    status: "ok"
+  });
+  console.log("Scheduler Timestamp aktualisiert");
 }
 
 async function fetchRSI(symbol) {
