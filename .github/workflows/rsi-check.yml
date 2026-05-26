@@ -1,22 +1,23 @@
 name: RSI Alarm Check
-
 on:
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
       - name: Node.js einrichten
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-
       - name: Abhängigkeiten installieren
         run: npm install
-
       - name: RSI Alarme prüfen
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
