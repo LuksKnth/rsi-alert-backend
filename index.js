@@ -7,6 +7,9 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
+// Display labels for notifications
+const indicatorLabel = { rsi: "RSI", rvi: "RVI", price: "Kurs" };
+
 async function checkAlarms() {
   const db = admin.firestore();
   const usersSnapshot = await db.collection("users").get();
@@ -27,19 +30,21 @@ async function checkAlarms() {
       if (!symbol || !alarms || alarms.length === 0) continue;
 
       // Determine which indicators are needed for this ticker
-      const needsRSI = alarms.some(a => a.indicator === "rsi" && a.enabled);
-      const needsRVI = alarms.some(a => a.indicator === "rvi" && a.enabled);
+      const needsRSI   = alarms.some(a => a.indicator === "rsi"   && a.enabled);
+      const needsRVI   = alarms.some(a => a.indicator === "rvi"   && a.enabled);
+      const needsPrice = alarms.some(a => a.indicator === "price" && a.enabled);
 
-      if (!needsRSI && !needsRVI) continue;
+      if (!needsRSI && !needsRVI && !needsPrice) continue;
 
       // Fetch close prices once per ticker (symbol includes exchange suffix, e.g. "SAP.DE")
       const closes = await fetchCloses(symbol);
       if (!closes) continue;
 
-      const rsi = needsRSI ? calculateRSI(closes, 14) : null;
-      const rvi = needsRVI ? calculateRVI(closes, 14) : null;
+      const rsi   = needsRSI   ? calculateRSI(closes, 14) : null;
+      const rvi   = needsRVI   ? calculateRVI(closes, 14) : null;
+      const price = needsPrice ? closes[closes.length - 1] : null;
 
-      console.log(`${symbol}: RSI=${rsi !== null ? rsi.toFixed(1) : "n/a"}, RVI=${rvi !== null ? rvi.toFixed(1) : "n/a"}`);
+      console.log(`${symbol}: RSI=${rsi !== null ? rsi.toFixed(1) : "n/a"}, RVI=${rvi !== null ? rvi.toFixed(1) : "n/a"}, Kurs=${price !== null ? price.toFixed(2) : "n/a"}`);
 
       const newCrossingState = { ...crossingState };
       let stateChanged = false;
@@ -49,7 +54,11 @@ async function checkAlarms() {
 
         const { indicator, direction, threshold } = alarm;
         const stateKey = `${indicator}_${direction}`;
-        const currentValue = indicator === "rsi" ? rsi : rvi;
+
+        const currentValue =
+          indicator === "rsi"   ? rsi   :
+          indicator === "rvi"   ? rvi   :
+          indicator === "price" ? price : null;
 
         if (currentValue === null || threshold === undefined) continue;
 
@@ -61,20 +70,23 @@ async function checkAlarms() {
 
         // Only notify on fresh crossing (transition from normal → triggered)
         if (isTriggered && !wasTriggered) {
-          const name = displayName || symbol;
-          const indicatorLabel = indicator.toUpperCase();
+          const name           = displayName || symbol;
+          const label          = indicatorLabel[indicator] || indicator.toUpperCase();
           const directionLabel = direction === "above" ? "überschritten" : "unterschritten";
+          const valueFormatted = indicator === "price"
+            ? currentValue.toFixed(2)
+            : currentValue.toFixed(1);
 
           try {
             await admin.messaging().send({
               token: fcmToken,
               notification: {
                 title: name,
-                body: `${indicatorLabel} bei ${currentValue.toFixed(1)} – Limit ${directionLabel}`
+                body: `${label} bei ${valueFormatted} – Limit ${directionLabel}`
               },
               data: { symbol, indicator, direction }
             });
-            console.log(`✓ Alarm gesendet: ${symbol} ${indicatorLabel} ${currentValue.toFixed(1)} ${direction} ${threshold}`);
+            console.log(`✓ Alarm gesendet: ${symbol} ${label} ${valueFormatted} ${direction} ${threshold}`);
           } catch (e) {
             console.error(`✗ FCM-Fehler für ${symbol}:`, e.message);
           }
@@ -146,7 +158,6 @@ function calculateRSI(closes, period) {
 function calculateRVI(closes, period) {
   if (closes.length < period * 2 + 1) return null;
 
-  // Compute standard deviation and direction for each bar from index `period` onward
   const entries = [];
   for (let i = period; i < closes.length; i++) {
     const slice = closes.slice(i - period, i);
@@ -159,7 +170,6 @@ function calculateRVI(closes, period) {
 
   if (entries.length < period) return null;
 
-  // Seed with simple average for first period
   let avgUp = 0, avgDown = 0;
   for (let i = 0; i < period; i++) {
     if (entries[i].isUp) avgUp += entries[i].std;
@@ -168,7 +178,6 @@ function calculateRVI(closes, period) {
   avgUp /= period;
   avgDown /= period;
 
-  // Wilder smoothing for remaining entries
   for (let i = period; i < entries.length; i++) {
     const stdUp   = entries[i].isUp ? entries[i].std : 0;
     const stdDown = entries[i].isUp ? 0 : entries[i].std;
