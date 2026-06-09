@@ -18,7 +18,7 @@ jobs:
           node-version: '24'
       - name: Abhängigkeiten installieren
         run: npm install
-      - name: RSI Alarme prüfen
+      - name: Alarme prüfen
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: node index.js
