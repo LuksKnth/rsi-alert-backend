@@ -7,9 +7,6 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
 
-// Display labels for notifications
-const indicatorLabel = { rsi: "RSI", rvi: "RVI", price: "Kurs" };
-
 async function checkAlarms() {
   const db = admin.firestore();
   const usersSnapshot = await db.collection("users").get();
@@ -29,14 +26,12 @@ async function checkAlarms() {
 
       if (!symbol || !alarms || alarms.length === 0) continue;
 
-      // Determine which indicators are needed for this ticker
       const needsRSI   = alarms.some(a => a.indicator === "rsi"   && a.enabled);
       const needsRVI   = alarms.some(a => a.indicator === "rvi"   && a.enabled);
       const needsPrice = alarms.some(a => a.indicator === "price" && a.enabled);
 
       if (!needsRSI && !needsRVI && !needsPrice) continue;
 
-      // Fetch close prices once per ticker (symbol includes exchange suffix, e.g. "SAP.DE")
       const closes = await fetchCloses(symbol);
       if (!closes) continue;
 
@@ -68,45 +63,59 @@ async function checkAlarms() {
 
         const wasTriggered = crossingState[stateKey] === true;
 
-        // Only notify on fresh crossing (transition from normal → triggered)
         if (isTriggered && !wasTriggered) {
           const name           = displayName || symbol;
-          const label          = indicatorLabel[indicator] || indicator.toUpperCase();
-          const directionLabel = direction === "above" ? "überschritten" : "unterschritten";
           const valueFormatted = indicator === "price"
             ? currentValue.toFixed(2)
             : currentValue.toFixed(1);
 
           try {
+            // Notification Service Extension on the device handles localization.
+            // We send mutable-content + all data fields; the extension builds the
+            // localized title/body before iOS displays the notification.
             await admin.messaging().send({
               token: fcmToken,
+              apns: {
+                payload: {
+                  aps: {
+                    "mutable-content": 1,
+                    sound: "default"
+                  }
+                }
+              },
+              // Minimal placeholder — extension replaces this before display
               notification: {
                 title: name,
-                body: `${label} bei ${valueFormatted} – Limit ${directionLabel}`
+                body: " "
               },
-              data: { symbol, indicator, direction }
+              // All fields the extension needs to build the localized notification
+              data: {
+                symbol,
+                displayName: name,
+                indicator,
+                direction,
+                value: valueFormatted,
+                threshold: String(threshold)
+              }
             });
-            console.log(`✓ Alarm gesendet: ${symbol} ${label} ${valueFormatted} ${direction} ${threshold}`);
+            console.log(`✓ Alarm gesendet: ${symbol} ${indicator} ${valueFormatted} ${direction} ${threshold}`);
           } catch (e) {
             console.error(`✗ FCM-Fehler für ${symbol}:`, e.message);
           }
         }
 
-        // Update crossing state if changed
         if (newCrossingState[stateKey] !== isTriggered) {
           newCrossingState[stateKey] = isTriggered;
           stateChanged = true;
         }
       }
 
-      // Write state back to Firestore only if something changed
       if (stateChanged) {
         await tickerDoc.ref.update({ crossingState: newCrossingState });
       }
     }
   }
 
-  // Heartbeat
   await db.collection("status").doc("scheduler").set({
     lastRun: admin.firestore.FieldValue.serverTimestamp(),
     status: "ok"
@@ -114,8 +123,6 @@ async function checkAlarms() {
   console.log("Scheduler Timestamp aktualisiert");
 }
 
-// Fetch daily close prices from Yahoo Finance
-// symbol must be the full Yahoo Finance symbol including exchange suffix (e.g. "SAP.DE", "IWDA.AS", "AAPL")
 async function fetchCloses(symbol) {
   try {
     const { data } = await axios.get(
@@ -130,7 +137,6 @@ async function fetchCloses(symbol) {
   }
 }
 
-// Wilder's RSI (period = 14)
 function calculateRSI(closes, period) {
   if (closes.length < period + 1) return null;
 
@@ -153,8 +159,6 @@ function calculateRSI(closes, period) {
   return 100 - (100 / (1 + avgGain / avgLoss));
 }
 
-// Relative Volatility Index (Dorsey, period = 14)
-// Uses Wilder smoothing on per-bar standard deviations, split by up/down days
 function calculateRVI(closes, period) {
   if (closes.length < period * 2 + 1) return null;
 
