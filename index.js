@@ -127,7 +127,7 @@ async function fetchCloses(symbol) {
   try {
     const { data } = await axios.get(
       `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`,
-      { params: { interval: "1d", range: "3mo" } }
+      { params: { interval: "1d", range: "1y" } }
     );
     const closes = data.chart.result[0].indicators.quote[0].close;
     return closes.filter(c => c !== null && c !== undefined);
